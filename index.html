@@ -1,0 +1,713 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#2b1a0e">
+<title>쇠구슬 미로</title>
+<style>
+  :root {
+    --ink: #f6ead8;
+    --accent: #e8b04a;
+    --panel: rgba(30, 18, 8, 0.86);
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    width: 100%; height: 100%; overflow: hidden;
+    background: #1c110a;
+    color: var(--ink);
+    font-family: -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Malgun Gothic", "Noto Sans KR", sans-serif;
+    touch-action: none; user-select: none; -webkit-user-select: none;
+  }
+  canvas { display: block; position: absolute; inset: 0; }
+  #hud {
+    position: absolute; top: 0; left: 0; right: 0;
+    display: flex; justify-content: space-between; align-items: center;
+    padding: max(8px, env(safe-area-inset-top)) 14px 8px;
+    font-weight: 700; font-size: 16px; pointer-events: none;
+    text-shadow: 0 1px 3px rgba(0,0,0,.7);
+  }
+  #hud .group { display: flex; gap: 16px; align-items: center; }
+  #hud button { pointer-events: auto; }
+  .chip {
+    background: rgba(0,0,0,.35); border-radius: 999px; padding: 5px 12px;
+    font-variant-numeric: tabular-nums;
+  }
+  .btn {
+    font: inherit; font-weight: 700; color: #2b1a0e; background: var(--accent);
+    border: none; border-radius: 12px; padding: 12px 22px; font-size: 18px; cursor: pointer;
+    box-shadow: 0 3px 0 #9c6f1f;
+  }
+  .btn:active { transform: translateY(2px); box-shadow: 0 1px 0 #9c6f1f; }
+  .btn.small { font-size: 14px; padding: 6px 12px; border-radius: 9px; box-shadow: 0 2px 0 #9c6f1f; }
+  .btn.ghost { background: rgba(255,255,255,.12); color: var(--ink); box-shadow: none; }
+  .overlay {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    background: rgba(10, 6, 3, 0.55); backdrop-filter: blur(3px); -webkit-backdrop-filter: blur(3px);
+    padding: 16px;
+  }
+  .overlay.hidden { display: none; }
+  .card {
+    background: var(--panel); border: 1px solid rgba(232,176,74,.35); border-radius: 20px;
+    padding: 28px 26px; max-width: 440px; width: 100%; text-align: center;
+    box-shadow: 0 20px 60px rgba(0,0,0,.5);
+  }
+  .card h1 { font-size: 32px; margin-bottom: 6px; color: var(--accent); letter-spacing: -0.5px; }
+  .card h2 { font-size: 26px; margin-bottom: 10px; color: var(--accent); }
+  .card p { line-height: 1.6; opacity: .92; margin-bottom: 18px; font-size: 15px; }
+  .card .row { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; }
+  .card .note { font-size: 13px; opacity: .65; margin-top: 16px; margin-bottom: 0; }
+  .stat { font-size: 40px; font-weight: 800; margin: 6px 0 14px; font-variant-numeric: tabular-nums; }
+  .ball-icon {
+    width: 64px; height: 64px; border-radius: 50%; margin: 0 auto 14px;
+    background: radial-gradient(circle at 35% 30%, #fff 0%, #dfe4ea 12%, #8a939d 45%, #3b4148 80%, #22262b 100%);
+    box-shadow: 0 6px 14px rgba(0,0,0,.6);
+  }
+  #toast {
+    position: absolute; bottom: max(20px, env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%);
+    background: rgba(0,0,0,.7); padding: 8px 16px; border-radius: 999px; font-size: 14px;
+    opacity: 0; transition: opacity .3s; pointer-events: none; white-space: nowrap;
+  }
+  #toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+
+<div id="hud">
+  <div class="group">
+    <span class="chip" id="lvl">레벨 1</span>
+    <span class="chip" id="time">0.0초</span>
+  </div>
+  <div class="group">
+    <button class="btn small ghost" id="calBtn" title="지금 기울기를 수평으로 설정">수평 맞추기</button>
+    <button class="btn small ghost" id="pauseBtn">일시정지</button>
+  </div>
+</div>
+
+<div class="overlay" id="startOv">
+  <div class="card">
+    <div class="ball-icon"></div>
+    <h1>쇠구슬 미로</h1>
+    <p>태블릿을 기울여 쇠구슬을 굴리세요.<br>구멍에 빠지지 않게 조심하면서<br><b>빛나는 출구</b>까지 도착하면 성공!</p>
+    <div class="row"><button class="btn" id="startBtn">시작하기</button></div>
+    <p class="note">태블릿을 평평하게 든 상태에서 시작하세요.<br>센서가 없는 기기에서는 방향키 / WASD 또는 화면 드래그로 조작합니다.</p>
+  </div>
+</div>
+
+<div class="overlay hidden" id="pauseOv">
+  <div class="card">
+    <h2>일시정지</h2>
+    <div class="row">
+      <button class="btn" id="resumeBtn">계속하기</button>
+      <button class="btn ghost" id="restartBtn">레벨 다시 하기</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay hidden" id="winOv">
+  <div class="card">
+    <h2 id="winTitle">레벨 클리어!</h2>
+    <div class="stat" id="winTime">0.0초</div>
+    <p id="winBest"></p>
+    <div class="row"><button class="btn" id="nextBtn">다음 레벨</button></div>
+  </div>
+</div>
+
+<div id="toast"></div>
+
+<script>
+(() => {
+  'use strict';
+
+  // ---------- 기본 설정 ----------
+  const canvas = document.getElementById('c');
+  const ctx = canvas.getContext('2d');
+  const $ = id => document.getElementById(id);
+
+  let W = 0, H = 0, DPR = 1;
+  const HUD_H = 52;
+
+  const state = {
+    level: 1,
+    running: false,
+    paused: false,
+    time: 0,
+    falls: 0,
+  };
+
+  let maze = null;      // { cols, rows, cell, ox, oy, walls:[rects], holes:[], start, goal }
+  let ball = null;      // { x, y, vx, vy, r, falling, fallT, rot }
+  let boardCache = null;
+
+  // ---------- 기울기 입력 ----------
+  const tilt = { x: 0, y: 0, rawB: 0, rawG: 0, calB: 0, calG: 0, hasSensor: false };
+  const keys = {};
+  const drag = { active: false, sx: 0, sy: 0, x: 0, y: 0 };
+
+  function screenAngle() {
+    if (screen.orientation && typeof screen.orientation.angle === 'number') return screen.orientation.angle;
+    if (typeof window.orientation === 'number') return window.orientation;
+    return 0;
+  }
+
+  function onOrientation(e) {
+    if (e.beta == null || e.gamma == null) return;
+    tilt.hasSensor = true;
+    tilt.rawB = e.beta;
+    tilt.rawG = e.gamma;
+  }
+
+  // 기기 좌표(beta/gamma)를 화면 좌표의 기울기로 변환
+  function sensorTilt() {
+    const b = tilt.rawB - tilt.calB;
+    const g = tilt.rawG - tilt.calG;
+    let x, y;
+    switch ((screenAngle() + 360) % 360) {
+      case 90:  x = b;  y = -g; break;
+      case 180: x = -g; y = -b; break;
+      case 270: x = -b; y = g;  break;
+      default:  x = g;  y = b;
+    }
+    return { x, y };
+  }
+
+  function calibrate() {
+    tilt.calB = tilt.rawB;
+    tilt.calG = tilt.rawG;
+    toast('현재 기울기를 수평으로 맞췄어요');
+  }
+
+  async function requestSensor() {
+    try {
+      if (typeof DeviceOrientationEvent !== 'undefined' &&
+          typeof DeviceOrientationEvent.requestPermission === 'function') {
+        const res = await DeviceOrientationEvent.requestPermission();
+        if (res !== 'granted') { toast('센서 권한이 거부되어 키보드/드래그로 조작합니다'); return; }
+      }
+      window.addEventListener('deviceorientation', onOrientation);
+    } catch (err) {
+      toast('센서를 사용할 수 없어 키보드/드래그로 조작합니다');
+    }
+  }
+
+  window.addEventListener('keydown', e => { keys[e.key.toLowerCase()] = true; if (e.key === ' ' || e.key.startsWith('Arrow')) e.preventDefault(); });
+  window.addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
+
+  canvas.addEventListener('pointerdown', e => {
+    drag.active = true; drag.sx = e.clientX; drag.sy = e.clientY; drag.x = e.clientX; drag.y = e.clientY;
+  });
+  window.addEventListener('pointermove', e => { if (drag.active) { drag.x = e.clientX; drag.y = e.clientY; } });
+  window.addEventListener('pointerup', () => { drag.active = false; });
+  window.addEventListener('pointercancel', () => { drag.active = false; });
+
+  // 모든 입력을 합쳐 -1..1 범위의 기울기로
+  function readTilt() {
+    let x = 0, y = 0;
+    const MAX_DEG = 22;
+    if (tilt.hasSensor) {
+      const s = sensorTilt();
+      x = s.x / MAX_DEG; y = s.y / MAX_DEG;
+    }
+    let kx = 0, ky = 0;
+    if (keys['arrowleft'] || keys['a']) kx -= 1;
+    if (keys['arrowright'] || keys['d']) kx += 1;
+    if (keys['arrowup'] || keys['w']) ky -= 1;
+    if (keys['arrowdown'] || keys['s']) ky += 1;
+    x += kx * 0.7; y += ky * 0.7;
+    if (drag.active) {
+      const range = Math.min(W, H) * 0.25;
+      x += (drag.x - drag.sx) / range;
+      y += (drag.y - drag.sy) / range;
+    }
+    const clamp = v => Math.max(-1, Math.min(1, v));
+    // 아주 작은 기울기는 무시 (손 떨림 보정)
+    const dz = v => Math.abs(v) < 0.03 ? 0 : v;
+    tilt.x = dz(clamp(x)); tilt.y = dz(clamp(y));
+  }
+
+  // ---------- 미로 생성 ----------
+  function rng(seed) {
+    let s = seed >>> 0;
+    return () => { s = (s + 0x6D2B79F5) >>> 0; let t = s; t = Math.imul(t ^ (t >>> 15), t | 1); t ^= t + Math.imul(t ^ (t >>> 7), t | 61); return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
+  }
+
+  function buildMaze(level) {
+    const rand = rng((Date.now() ^ (level * 7919)) >>> 0);
+    const availW = Math.max(160, W - 24), availH = Math.max(160, H - HUD_H - 16);
+    const landscape = availW >= availH;
+    const shortCount = Math.min(4 + level, 13);
+    const cellGuess = (landscape ? availH : availW) / shortCount;
+    let cols = Math.max(4, Math.floor(availW / cellGuess));
+    let rows = Math.max(4, Math.floor(availH / cellGuess));
+    const cell = Math.floor(Math.min(availW / cols, availH / rows));
+    const ox = Math.floor((W - cols * cell) / 2);
+    const oy = Math.floor(HUD_H + (availH - rows * cell) / 2 + 4);
+
+    // 각 칸의 벽: [위, 오른쪽, 아래, 왼쪽]
+    const grid = [];
+    for (let r = 0; r < rows; r++) { grid.push([]); for (let c = 0; c < cols; c++) grid[r].push({ w: [1, 1, 1, 1], v: false }); }
+    const DR = [-1, 0, 1, 0], DC = [0, 1, 0, -1];
+    const stack = [[0, 0]]; grid[0][0].v = true;
+    while (stack.length) {
+      const [r, c] = stack[stack.length - 1];
+      const opts = [];
+      for (let d = 0; d < 4; d++) {
+        const nr = r + DR[d], nc = c + DC[d];
+        if (nr >= 0 && nr < rows && nc >= 0 && nc < cols && !grid[nr][nc].v) opts.push(d);
+      }
+      if (!opts.length) { stack.pop(); continue; }
+      const d = opts[Math.floor(rand() * opts.length)];
+      const nr = r + DR[d], nc = c + DC[d];
+      grid[r][c].w[d] = 0; grid[nr][nc].w[(d + 2) % 4] = 0; grid[nr][nc].v = true;
+      stack.push([nr, nc]);
+    }
+    // 높은 레벨에서는 길을 몇 개 더 뚫어서 순환 경로 생성
+    const extra = Math.floor(cols * rows * 0.06);
+    for (let i = 0; i < extra; i++) {
+      const r = Math.floor(rand() * rows), c = Math.floor(rand() * cols), d = Math.floor(rand() * 4);
+      const nr = r + DR[d], nc = c + DC[d];
+      if (nr >= 0 && nr < rows && nc >= 0 && nc < cols) { grid[r][c].w[d] = 0; grid[nr][nc].w[(d + 2) % 4] = 0; }
+    }
+
+    const start = { r: 0, c: 0 };
+    // 출구: 시작점에서 가장 먼 칸
+    const dist = bfs(grid, rows, cols, start, DR, DC);
+    let goal = { r: rows - 1, c: cols - 1 }, best = -1;
+    for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+      if (dist.d[r][c] > best && (r >= rows / 2 || c >= cols / 2)) { best = dist.d[r][c]; goal = { r, c }; }
+    }
+    // 정답 경로
+    const onPath = new Set();
+    let cur = goal;
+    while (cur) { onPath.add(cur.r * cols + cur.c); cur = dist.p[cur.r][cur.c]; }
+
+    // 벽 사각형
+    const t = Math.max(4, Math.round(cell * 0.12));
+    const walls = [];
+    const addRect = (x, y, w, h) => walls.push({ x, y, w, h });
+    for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+      const x = ox + c * cell, y = oy + r * cell, g = grid[r][c];
+      if (g.w[0]) addRect(x - t / 2, y - t / 2, cell + t, t);
+      if (g.w[3]) addRect(x - t / 2, y - t / 2, t, cell + t);
+      if (r === rows - 1 && g.w[2]) addRect(x - t / 2, y + cell - t / 2, cell + t, t);
+      if (c === cols - 1 && g.w[1]) addRect(x + cell - t / 2, y - t / 2, t, cell + t);
+    }
+
+    // 함정 구멍: 정답 경로 바깥 칸 + 경로 위 칸의 가장자리
+    const holes = [];
+    const holeR = cell * 0.27;
+    const nHoles = Math.min(Math.floor((level - 1) * 1.6), Math.floor(cols * rows * 0.22));
+    const candidates = [];
+    for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) {
+      if ((r === start.r && c === start.c) || (r === goal.r && c === goal.c)) continue;
+      if (Math.abs(r - start.r) + Math.abs(c - start.c) < 2) continue;
+      if (!onPath.has(r * cols + c)) candidates.push({ r, c, cx: ox + (c + .5) * cell, cy: oy + (r + .5) * cell });
+    }
+    // 정답 경로 위에는 벽 쪽 모서리에 구멍을 두어 피해 갈 수 있게
+    if (level >= 4) {
+      for (const key of onPath) {
+        const r = Math.floor(key / cols), c = key % cols;
+        if ((r === start.r && c === start.c) || (r === goal.r && c === goal.c)) continue;
+        if (Math.abs(r - start.r) + Math.abs(c - start.c) < 3) continue;
+        const g = grid[r][c];
+        const closed = [0, 1, 2, 3].filter(d => g.w[d]);
+        if (closed.length < 2) continue;
+        // 막힌 두 벽이 만나는 모서리에 배치
+        for (let i = 0; i < 4; i++) {
+          const d1 = i, d2 = (i + 1) % 4;
+          if (g.w[d1] && g.w[d2] && rand() < 0.35) {
+            const off = cell * 0.5 - holeR - t * 0.6;
+            const cx = ox + (c + .5) * cell + (DC[d1] + DC[d2]) * off;
+            const cy = oy + (r + .5) * cell + (DR[d1] + DR[d2]) * off;
+            candidates.push({ r, c, cx, cy, corner: true });
+            break;
+          }
+        }
+      }
+    }
+    shuffle(candidates, rand);
+    const used = new Set();
+    for (const cnd of candidates) {
+      if (holes.length >= nHoles) break;
+      const k = cnd.r * cols + cnd.c;
+      if (used.has(k)) continue;
+      used.add(k);
+      holes.push({ x: cnd.cx, y: cnd.cy, r: holeR });
+    }
+
+    return {
+      cols, rows, cell, ox, oy, t, walls, holes, grid,
+      start: { x: ox + (start.c + .5) * cell, y: oy + (start.r + .5) * cell },
+      goal: { x: ox + (goal.c + .5) * cell, y: oy + (goal.r + .5) * cell, r: cell * 0.33 },
+    };
+  }
+
+  function bfs(grid, rows, cols, s, DR, DC) {
+    const d = [], p = [];
+    for (let r = 0; r < rows; r++) { d.push(new Array(cols).fill(-1)); p.push(new Array(cols).fill(null)); }
+    d[s.r][s.c] = 0;
+    const q = [s];
+    while (q.length) {
+      const cur = q.shift();
+      for (let k = 0; k < 4; k++) {
+        if (grid[cur.r][cur.c].w[k]) continue;
+        const nr = cur.r + DR[k], nc = cur.c + DC[k];
+        if (nr < 0 || nr >= rows || nc < 0 || nc >= cols || d[nr][nc] >= 0) continue;
+        d[nr][nc] = d[cur.r][cur.c] + 1; p[nr][nc] = cur; q.push({ r: nr, c: nc });
+      }
+    }
+    return { d, p };
+  }
+
+  function shuffle(a, rand) { for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rand() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } }
+
+  // ---------- 게임 흐름 ----------
+  function resetBall() {
+    ball = { x: maze.start.x, y: maze.start.y, vx: 0, vy: 0, r: maze.cell * 0.22, falling: false, fallT: 0, rot: 0, hx: 0, hy: 0 };
+  }
+
+  function startLevel() {
+    maze = buildMaze(state.level);
+    boardCache = null;
+    resetBall();
+    state.time = 0; state.falls = 0;
+    state.running = true; state.paused = false;
+    $('lvl').textContent = `레벨 ${state.level}`;
+  }
+
+  function win() {
+    state.running = false;
+    const t = state.time;
+    const key = 'steelmaze_best_' + state.level;
+    let best = null;
+    try { best = parseFloat(localStorage.getItem(key)); } catch (e) {}
+    let msg;
+    if (!best || t < best) {
+      try { localStorage.setItem(key, String(t)); } catch (e) {}
+      msg = best ? `🏆 최고 기록 갱신! (이전 ${best.toFixed(1)}초)` : '첫 기록이에요!';
+    } else {
+      msg = `최고 기록 ${best.toFixed(1)}초`;
+    }
+    if (state.falls) msg += ` · 구멍에 ${state.falls}번 빠짐`;
+    $('winTitle').textContent = `레벨 ${state.level} 클리어!`;
+    $('winTime').textContent = t.toFixed(1) + '초';
+    $('winBest').textContent = msg;
+    $('winOv').classList.remove('hidden');
+    vibrate([40, 60, 40, 60, 120]);
+  }
+
+  function vibrate(p) { try { navigator.vibrate && navigator.vibrate(p); } catch (e) {} }
+
+  let toastTimer = 0;
+  function toast(msg) {
+    const el = $('toast'); el.textContent = msg; el.classList.add('show');
+    clearTimeout(toastTimer); toastTimer = setTimeout(() => el.classList.remove('show'), 2200);
+  }
+
+  // ---------- 물리 ----------
+  const GRAVITY = 2600;     // px/s² (최대 기울기 기준)
+  const FRICTION = 0.9;     // 초당 속도 유지 비율 계수
+  const BOUNCE = 0.38;
+  let lastHitT = 0;
+
+  function step(dt) {
+    if (!state.running || state.paused) return;
+    state.time += dt;
+    const b = ball;
+    const scale = maze.cell / 70; // 칸 크기에 비례한 중력
+
+    if (b.falling) {
+      b.fallT += dt;
+      b.x += (b.hx - b.x) * Math.min(1, dt * 12);
+      b.y += (b.hy - b.y) * Math.min(1, dt * 12);
+      if (b.fallT > 0.55) { state.falls++; resetBall(); }
+      return;
+    }
+
+    b.vx += tilt.x * GRAVITY * scale * dt;
+    b.vy += tilt.y * GRAVITY * scale * dt;
+
+    // 구멍 근처에서는 살짝 빨려 들어감
+    for (const h of maze.holes) {
+      const dx = h.x - b.x, dy = h.y - b.y, d = Math.hypot(dx, dy);
+      if (d < h.r + b.r * 0.4 && d > 0.001) {
+        const pull = 1800 * scale * (1 - d / (h.r + b.r * 0.4));
+        b.vx += dx / d * pull * dt; b.vy += dy / d * pull * dt;
+      }
+    }
+
+    const f = Math.pow(1 - FRICTION * 0.5, dt);
+    b.vx *= f; b.vy *= f;
+
+    const maxV = maze.cell * 14;
+    const sp = Math.hypot(b.vx, b.vy);
+    if (sp > maxV) { b.vx *= maxV / sp; b.vy *= maxV / sp; }
+
+    // 벽 통과 방지를 위한 하위 스텝
+    const move = Math.hypot(b.vx, b.vy) * dt;
+    const n = Math.max(1, Math.ceil(move / (b.r * 0.4)));
+    const sdt = dt / n;
+    let hitStrength = 0;
+    for (let i = 0; i < n; i++) {
+      b.x += b.vx * sdt; b.y += b.vy * sdt;
+      for (const w of maze.walls) hitStrength = Math.max(hitStrength, collide(b, w));
+    }
+    b.rot += Math.hypot(b.vx, b.vy) * dt / b.r;
+
+    if (hitStrength > maze.cell * 2.2 && performance.now() - lastHitT > 90) {
+      lastHitT = performance.now();
+      vibrate(Math.min(30, 8 + hitStrength / maze.cell * 2));
+    }
+
+    // 구멍에 빠짐
+    for (const h of maze.holes) {
+      if (Math.hypot(h.x - b.x, h.y - b.y) < h.r * 0.72) {
+        b.falling = true; b.fallT = 0; b.hx = h.x; b.hy = h.y;
+        vibrate([60, 40, 80]);
+        return;
+      }
+    }
+    // 출구 도착
+    if (Math.hypot(maze.goal.x - b.x, maze.goal.y - b.y) < maze.goal.r * 0.8) {
+      b.falling = true; b.fallT = -10; b.hx = maze.goal.x; b.hy = maze.goal.y;
+      win();
+    }
+  }
+
+  function collide(b, w) {
+    const cx = Math.max(w.x, Math.min(b.x, w.x + w.w));
+    const cy = Math.max(w.y, Math.min(b.y, w.y + w.h));
+    let dx = b.x - cx, dy = b.y - cy;
+    let d2 = dx * dx + dy * dy;
+    if (d2 >= b.r * b.r) return 0;
+    let d = Math.sqrt(d2), nx, ny;
+    if (d < 1e-6) {
+      // 중심이 벽 안쪽: 가장 가까운 면으로 밀어냄
+      const l = b.x - w.x, r = w.x + w.w - b.x, t = b.y - w.y, bt = w.y + w.h - b.y;
+      const m = Math.min(l, r, t, bt);
+      nx = m === l ? -1 : m === r ? 1 : 0; ny = m === t ? -1 : m === bt ? 1 : 0;
+      d = 0;
+    } else { nx = dx / d; ny = dy / d; }
+    const pen = b.r - d;
+    b.x += nx * pen; b.y += ny * pen;
+    const vn = b.vx * nx + b.vy * ny;
+    if (vn < 0) {
+      b.vx -= (1 + BOUNCE) * vn * nx;
+      b.vy -= (1 + BOUNCE) * vn * ny;
+      // 벽에 닿으면 접선 방향으로 약간의 마찰
+      const tx = -ny, ty = nx, vt = b.vx * tx + b.vy * ty;
+      b.vx -= vt * 0.02 * tx; b.vy -= vt * 0.02 * ty;
+      return -vn;
+    }
+    return 0;
+  }
+
+  // ---------- 렌더링 ----------
+  function makeBoard() {
+    const off = document.createElement('canvas');
+    off.width = W * DPR; off.height = H * DPR;
+    const g = off.getContext('2d');
+    g.scale(DPR, DPR);
+    const { ox, oy, cols, rows, cell, t } = maze;
+    const bw = cols * cell, bh = rows * cell;
+
+    // 테이블 배경
+    g.fillStyle = '#1c110a'; g.fillRect(0, 0, W, H);
+
+    // 나무 프레임
+    const pad = Math.max(10, t * 1.4);
+    roundRect(g, ox - pad, oy - pad, bw + pad * 2, bh + pad * 2, 14);
+    const fr = g.createLinearGradient(0, oy - pad, 0, oy + bh + pad);
+    fr.addColorStop(0, '#7a4a24'); fr.addColorStop(1, '#4e2c14');
+    g.fillStyle = fr; g.fill();
+
+    // 나무 판
+    const wood = g.createLinearGradient(ox, oy, ox + bw, oy + bh);
+    wood.addColorStop(0, '#d9a96a'); wood.addColorStop(0.5, '#c8925a'); wood.addColorStop(1, '#b8804a');
+    g.fillStyle = wood; g.fillRect(ox, oy, bw, bh);
+    // 나뭇결
+    const rand = rng(42);
+    g.save(); g.beginPath(); g.rect(ox, oy, bw, bh); g.clip();
+    for (let i = 0; i < bh / 3; i++) {
+      const y = oy + i * 3 + rand() * 2;
+      g.strokeStyle = `rgba(110, 60, 25, ${0.04 + rand() * 0.08})`;
+      g.lineWidth = 0.6 + rand() * 1.4;
+      g.beginPath(); g.moveTo(ox, y);
+      const amp = 2 + rand() * 4, fq = 0.004 + rand() * 0.01, ph = rand() * 6;
+      for (let x = 0; x <= bw; x += 12) g.lineTo(ox + x, y + Math.sin(x * fq + ph) * amp);
+      g.stroke();
+    }
+    // 판 가장자리 안쪽 그림자
+    const inner = g.createLinearGradient(0, oy, 0, oy + 18);
+    inner.addColorStop(0, 'rgba(0,0,0,.25)'); inner.addColorStop(1, 'rgba(0,0,0,0)');
+    g.fillStyle = inner; g.fillRect(ox, oy, bw, 18);
+    g.restore();
+
+    // 출발점 표시
+    g.save();
+    g.strokeStyle = 'rgba(80, 40, 10, .35)'; g.lineWidth = 2; g.setLineDash([4, 4]);
+    g.beginPath(); g.arc(maze.start.x, maze.start.y, cell * 0.32, 0, Math.PI * 2); g.stroke();
+    g.restore();
+
+    // 구멍
+    for (const h of maze.holes) drawHole(g, h.x, h.y, h.r, false);
+
+    // 벽 그림자
+    g.fillStyle = 'rgba(40, 18, 5, .35)';
+    const so = Math.max(2, t * 0.35);
+    for (const w of maze.walls) roundRectFill(g, w.x + so, w.y + so * 1.4, w.w, w.h, t * 0.3);
+    // 벽
+    for (const w of maze.walls) {
+      const gr = g.createLinearGradient(w.x, w.y, w.x, w.y + w.h);
+      gr.addColorStop(0, '#8b5a2e'); gr.addColorStop(1, '#6a3f1c');
+      g.fillStyle = gr; roundRectFill(g, w.x, w.y, w.w, w.h, t * 0.3);
+    }
+    // 벽 윗면 하이라이트
+    g.fillStyle = 'rgba(255, 220, 170, .18)';
+    for (const w of maze.walls) g.fillRect(w.x + 1, w.y + 1, w.w - 2, Math.max(1, Math.min(w.h, t) * 0.3));
+
+    return off;
+  }
+
+  function drawHole(g, x, y, r, isGoal) {
+    const grd = g.createRadialGradient(x, y - r * 0.15, r * 0.1, x, y, r);
+    if (isGoal) {
+      grd.addColorStop(0, '#0b1f12'); grd.addColorStop(0.75, '#123a20'); grd.addColorStop(1, '#2a6b3c');
+    } else {
+      grd.addColorStop(0, '#000'); grd.addColorStop(0.7, '#0d0703'); grd.addColorStop(1, '#3a1f0c');
+    }
+    g.fillStyle = grd; g.beginPath(); g.arc(x, y, r, 0, Math.PI * 2); g.fill();
+    g.strokeStyle = isGoal ? 'rgba(120,255,160,.35)' : 'rgba(255,220,170,.25)'; g.lineWidth = 1.5;
+    g.beginPath(); g.arc(x, y, r, 0.1 * Math.PI, 0.9 * Math.PI); g.stroke();
+  }
+
+  function roundRect(g, x, y, w, h, r) {
+    g.beginPath(); g.moveTo(x + r, y); g.arcTo(x + w, y, x + w, y + h, r); g.arcTo(x + w, y + h, x, y + h, r);
+    g.arcTo(x, y + h, x, y, r); g.arcTo(x, y, x + w, y, r); g.closePath();
+  }
+  function roundRectFill(g, x, y, w, h, r) { r = Math.min(r, w / 2, h / 2); roundRect(g, x, y, w, h, r); g.fill(); }
+
+  function draw(now) {
+    ctx.setTransform(DPR, 0, 0, DPR, 0, 0);
+    if (!maze) { ctx.fillStyle = '#1c110a'; ctx.fillRect(0, 0, W, H); return; }
+    if (!boardCache) boardCache = makeBoard();
+    ctx.drawImage(boardCache, 0, 0, W, H);
+
+    // 출구 (빛나는 효과)
+    const gl = maze.goal, pulse = 0.5 + 0.5 * Math.sin(now / 300);
+    const glow = ctx.createRadialGradient(gl.x, gl.y, gl.r * 0.5, gl.x, gl.y, gl.r * (1.6 + pulse * 0.4));
+    glow.addColorStop(0, 'rgba(120, 255, 160, .55)'); glow.addColorStop(1, 'rgba(120, 255, 160, 0)');
+    ctx.fillStyle = glow; ctx.beginPath(); ctx.arc(gl.x, gl.y, gl.r * 2.2, 0, Math.PI * 2); ctx.fill();
+    drawHole(ctx, gl.x, gl.y, gl.r, true);
+    ctx.fillStyle = 'rgba(200,255,215,.9)';
+    ctx.font = `700 ${Math.round(gl.r * 0.55)}px sans-serif`; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    if (!ball || !ball.falling || state.running) ctx.fillText('EXIT', gl.x, gl.y + gl.r * 1.45);
+
+    if (ball) drawBall(ball);
+
+    // 기울기 표시기
+    drawLevelIndicator();
+  }
+
+  function drawBall(b) {
+    let s = 1, alpha = 1;
+    if (b.falling) {
+      const k = Math.min(1, Math.max(0, b.fallT < 0 ? (b.fallT + 10) : b.fallT) / 0.5);
+      s = 1 - k * 0.55; alpha = 1 - k * 0.6;
+    }
+    const r = b.r * s;
+    // 그림자: 기울기 반대 방향으로 살짝
+    if (!b.falling) {
+      ctx.fillStyle = 'rgba(30, 12, 2, .35)';
+      ctx.beginPath(); ctx.ellipse(b.x + r * 0.25, b.y + r * 0.45, r * 1.0, r * 0.8, 0, 0, Math.PI * 2); ctx.fill();
+    }
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    const g = ctx.createRadialGradient(b.x - r * 0.35, b.y - r * 0.4, r * 0.05, b.x, b.y, r);
+    g.addColorStop(0, '#ffffff'); g.addColorStop(0.15, '#e6eaef'); g.addColorStop(0.5, '#8e98a3');
+    g.addColorStop(0.85, '#3d444c'); g.addColorStop(1, '#262a2f');
+    ctx.fillStyle = g; ctx.beginPath(); ctx.arc(b.x, b.y, r, 0, Math.PI * 2); ctx.fill();
+    // 반사광 (나무판의 따뜻한 색)
+    const rg = ctx.createRadialGradient(b.x + r * 0.3, b.y + r * 0.45, 0, b.x + r * 0.3, b.y + r * 0.45, r * 0.6);
+    rg.addColorStop(0, 'rgba(230, 170, 100, .45)'); rg.addColorStop(1, 'rgba(230, 170, 100, 0)');
+    ctx.fillStyle = rg; ctx.beginPath(); ctx.arc(b.x, b.y, r, 0, Math.PI * 2); ctx.fill();
+    // 스페큘러 하이라이트
+    ctx.fillStyle = 'rgba(255,255,255,.9)';
+    ctx.beginPath(); ctx.ellipse(b.x - r * 0.35, b.y - r * 0.42, r * 0.22, r * 0.14, -0.6, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+  }
+
+  function drawLevelIndicator() {
+    const R = 22, x = W - R - 16, y = H - R - Math.max(16, 16);
+    ctx.save();
+    ctx.globalAlpha = 0.75;
+    ctx.fillStyle = 'rgba(0,0,0,.45)'; ctx.beginPath(); ctx.arc(x, y, R, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = 'rgba(255,255,255,.25)'; ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.arc(x, y, R * 0.5, 0, Math.PI * 2); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x - R, y); ctx.lineTo(x + R, y); ctx.moveTo(x, y - R); ctx.lineTo(x, y + R); ctx.stroke();
+    ctx.fillStyle = '#e8b04a';
+    ctx.beginPath(); ctx.arc(x + tilt.x * (R - 6), y + tilt.y * (R - 6), 5, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+  }
+
+  // ---------- 루프 ----------
+  let last = performance.now();
+  function loop(now) {
+    let dt = (now - last) / 1000; last = now;
+    if (dt > 0.05) dt = 0.05;
+    readTilt();
+    step(dt);
+    if (state.running) $('time').textContent = state.time.toFixed(1) + '초';
+    draw(now);
+    requestAnimationFrame(loop);
+  }
+
+  // ---------- 화면 크기 ----------
+  function resize() {
+    DPR = Math.min(window.devicePixelRatio || 1, 2);
+    W = window.innerWidth; H = window.innerHeight;
+    canvas.width = Math.round(W * DPR); canvas.height = Math.round(H * DPR);
+    canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
+    if (maze && state.running) {
+      // 화면 회전 시 같은 레벨을 새 화면 비율로 다시 생성
+      startLevel();
+      toast('화면이 바뀌어 미로를 다시 만들었어요');
+    } else if (maze) {
+      maze = buildMaze(state.level); boardCache = null; resetBall();
+    }
+  }
+  let resizeTimer = 0;
+  window.addEventListener('resize', () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(resize, 200); });
+
+  // ---------- 버튼 ----------
+  $('startBtn').addEventListener('click', async () => {
+    await requestSensor();
+    try { if (screen.orientation && screen.orientation.lock) await screen.orientation.lock(screen.orientation.type).catch(() => {}); } catch (e) {}
+    $('startOv').classList.add('hidden');
+    startLevel();
+    setTimeout(() => { if (tilt.hasSensor) calibrate(); else toast('방향키·WASD 또는 화면 드래그로 조작하세요'); }, 400);
+  });
+  $('calBtn').addEventListener('click', e => { e.stopPropagation(); if (tilt.hasSensor) calibrate(); else toast('기울기 센서가 감지되지 않았어요'); });
+  $('pauseBtn').addEventListener('click', e => {
+    e.stopPropagation();
+    if (!state.running) return;
+    state.paused = true; $('pauseOv').classList.remove('hidden');
+  });
+  $('resumeBtn').addEventListener('click', () => { state.paused = false; $('pauseOv').classList.add('hidden'); last = performance.now(); });
+  $('restartBtn').addEventListener('click', () => { $('pauseOv').classList.add('hidden'); startLevel(); });
+  $('nextBtn').addEventListener('click', () => { $('winOv').classList.add('hidden'); state.level++; startLevel(); });
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden && state.running && !state.paused) { state.paused = true; $('pauseOv').classList.remove('hidden'); }
+  });
+
+  resize();
+  maze = buildMaze(1); resetBall();
+  requestAnimationFrame(loop);
+})();
+</script>
+</body>
+</html>
